@@ -19,6 +19,7 @@
 #include "render.c"
 #include "plot.c"
 #include "MicroUI.c"
+#include "functions.c"
 
 #define APP_NAME "Simulated Annealing\0"
 #define SCREEN_WIDTH 1600
@@ -28,21 +29,17 @@
 #include "ui_style.h"
 global MUI ui;
 global MUI_Input uiInput;
+global f32 coolRate = 0.01f;
+global u32 index = 0;
 
 f32 ObjectiveFunction(f32 x)
 {
     return sin(x) + sin((10.0/3.0)*x);
-    //return sin(x);
-    //sreturn 2-(5-x)*(5-x); 
-    //return -(1.4 - 3.0 * x) * sin(18.0 * x);
-    //return -(x+sin(x))*exp(-x*x);
-    //return -x* sin(x);
 }
 
 f32 Temperature(f32 x)
 {
-    return 30.0f*exp(-x*0.01);
-    //return 1-(x*0.3);
+    return 30.0f*exp(-x*coolRate);
 }
 
 f32 HillClimb(f32 x, f32 stepSize)
@@ -123,10 +120,10 @@ void StepSimulation(SimulationData *data)
         return;
     }
     
-    if(newCost < oldCost)
+    if(newCost > oldCost)
     {
         //probability of rejection
-        probability = exp(cost_diff / temp);
+        probability = exp(-cost_diff / temp);
         data->probability = probability;
         
         if(random < probability)
@@ -139,9 +136,9 @@ void StepSimulation(SimulationData *data)
         data->x = xNew;
     }
     
-    printf("%d=> x: %0.5f, x_new: %0.4f, r : %0.4f, prob: %0.4f, temp: %0.4f, cost_diff: %0.8f\n", data->iteration, data->x, xNew, random, probability, temp, cost_diff);
-    
     data->iteration++;
+    
+    printf("%d > x: %0.5f, x_new: %0.4f, r : %0.4f, prob: %0.4f, temp: %0.4f, y: %0.5f\n", data->iteration, data->x, xNew, random, probability, temp, data->objFunc(data->x));
     
     return;
 }
@@ -216,22 +213,31 @@ int main(int argc, char **argv)
     
     PlotStatic objFuncPlot = {
         .dataLength = 500.0f,
-        .xMin = 0,
-        .xMax = 9,
-        .yMin = -2.5f,
-        .yMax = 2.5f,
+        .xMin = functionDatas[index].xMin,
+        .xMax = functionDatas[index].xMax,
+        .yMin = functionDatas[index].yMin,
+        .yMax = functionDatas[index].yMax,
         .title = "objective function\0"
     };
     
-    PlotFunction(&objFuncPlot, ObjectiveFunction);
+    PlotFunction(&objFuncPlot, functionDatas[index].func);
     
     SimulationData data = {0};
-    data.x = RandomF32(objFuncPlot.xMin, objFuncPlot.xMax, 100.0f);
-    data.xMin = objFuncPlot.xMin;
-    data.xMax = objFuncPlot.xMax;
-    data.objFunc = ObjectiveFunction;
+    data.x = RandomF32(functionDatas[index].xMin, functionDatas[index].xMax, 100.0f);
+    data.xMin = functionDatas[index].xMin;
+    data.xMax = functionDatas[index].xMax;
+    data.objFunc = functionDatas[index].func;
     data.tempFunc = Temperature;
     data.iteration = 0;
+    
+    //text edit box data
+    coolRate = 0.01f;
+    TextEdit textEdit = {0};
+    textEdit.text[0] = '0';
+    textEdit.text[1] = '.';
+    textEdit.text[2] = '0';
+    textEdit.text[3] = '1';
+    textEdit.cursorPos = 4;
     
     b32 quitApp = false;
     SDL_Event event = {0};
@@ -240,6 +246,9 @@ int main(int argc, char **argv)
     
     while(!quitApp)
     {
+        uiInput.bTextInput = false;
+        uiInput.backSpaceDown = false;
+        
         while(SDL_PollEvent(&event))
         {
             MUI_GetInput(&uiInput, &event);
@@ -257,13 +266,32 @@ int main(int argc, char **argv)
                 }
                 else if(event.key.keysym.sym == SDLK_SPACE)
                 {
-                    StepSimulation(&data);
-                    PlotPushDataPoint(&tempPlot, data.iteration, data.temp);
-                    PlotPushDataPoint(&probPlot, data.iteration, data.probability);
-                }
-                else if(event.key.keysym.sym == SDLK_RETURN)
-                {
-                    printf("random %0.5f\n", RandomF32(0.0f, 1.0f, 10000.0f));
+                    run = false;
+                    u32 count = sizeof(functionDatas) / sizeof(functionDatas[0]);
+                    
+                    index++;
+                    
+                    if(index > count - 1)
+                    {
+                        index = 0;
+                    }
+                    
+                    objFuncPlot.dataLength = 500.0f,
+                    objFuncPlot.xMin = functionDatas[index].xMin,
+                    objFuncPlot.xMax = functionDatas[index].xMax,
+                    objFuncPlot.yMin = functionDatas[index].yMin,
+                    objFuncPlot.yMax = functionDatas[index].yMax,
+                    
+                    PlotFunction(&objFuncPlot, functionDatas[index].func);
+                    
+                    data.x = RandomF32(functionDatas[index].xMin, functionDatas[index].xMax, 100.0f);
+                    data.xMin = functionDatas[index].xMin;
+                    data.xMax = functionDatas[index].xMax;
+                    data.objFunc = functionDatas[index].func;
+                    data.iteration = 0;
+                    
+                    tempPlot.dataLength = 0;
+                    probPlot.dataLength = 0;
                 }
                 break;
                 
@@ -290,14 +318,16 @@ int main(int argc, char **argv)
             StepSimulation(&data);
             PlotPushDataPoint(&tempPlot, data.iteration, data.temp);
             PlotPushDataPoint(&probPlot, data.iteration, data.probability);
+            
+            // NOTE(abhicv): simulaion stop citeria
+            if((data.temp - 0.0f) < 0.001f)
+            {
+                run = false;
+            }
             //SDL_Delay(20);
         }
         
-        // NOTE(abhicv): simulaion stop citeria
-        if((data.temp - 0.0f) < 0.001f)
-        {
-            run = false;
-        }
+        MUI_BeginFrame(&ui, &uiInput);
         
         Rect panelRect = {
             .x = 5,
@@ -327,8 +357,6 @@ int main(int argc, char **argv)
             .height = 0.5 * (renderBuffer.height - 15),
         };
         
-        MUI_BeginFrame(&ui, &uiInput);
-        
         MUI_Rect uiRect = {0};
         uiRect.x = panelRect.x + 10;
         uiRect.y = panelRect.y + 10;
@@ -339,7 +367,6 @@ int main(int argc, char **argv)
         {
             //MUI_TextA(&ui, GEN_MUI_ID(), "Simulated Annealing !!\0", 20, textStyle);
             
-            //MUI_PushRowLayout(&ui, MUI_GetNextAutoLayoutRect(&ui), 5
             if(MUI_ButtonA(&ui, GEN_MUI_ID(), "run", buttonStyle))
             {
                 run = true;
@@ -368,9 +395,14 @@ int main(int argc, char **argv)
             sprintf(iterString, "Iteration:%d\0", data.iteration);
             MUI_TextA(&ui, GEN_MUI_ID(), iterString, 20, textStyle);
             
-            MUI_SliderA(&ui, GEN_MUI_ID(), 0.5f, sliderStyle);
+            //coolRate = MUI_SliderA(&ui, GEN_MUI_ID(), v, sliderStyle);
             
-        }MUI_PopLayout(&ui);
+            MUI_TextA(&ui, GEN_MUI_ID(), "Cooling Rate:", 20, textStyle);
+            
+            sscanf(textEdit.text, "%f", &coolRate);
+            MUI_TextEditA(&ui, GEN_MUI_ID(), buttonStyle, &textEdit);
+        }
+        MUI_PopLayout(&ui);
         
         // NOTE(abhicv): RENDERING
         //ClearBuffer(&renderBuffer, (Color){4, 35, 40, 255});
@@ -392,6 +424,7 @@ int main(int argc, char **argv)
         PlotAnnotate(&renderBuffer, &objFuncPlot, data.x, data.objFunc(data.x));
         DrawRectWire(&renderBuffer, &objFuncPlotRect, (Color){255, 255, 255, 255});
         
+        //ui panel
         DrawRectWire(&renderBuffer, &panelRect, (Color){255, 255, 255, 255});
         MUI_EndFrame(&ui, &renderBuffer, fontData);
         
@@ -399,8 +432,6 @@ int main(int argc, char **argv)
         SDL_RenderClear(renderer);
         SDL_RenderCopy(renderer, texture, NULL, NULL);
         SDL_RenderPresent(renderer);
-        
-        //SDL_Delay(60);
     }
     
     SDL_Quit();

@@ -76,7 +76,7 @@ typedef struct MUI_Widget
         struct Slider
         {
             f32 value;
-            
+            char valueStr[10];
         } slider;
         
         struct Text
@@ -85,6 +85,11 @@ typedef struct MUI_Widget
             u32 fontSize;
             
         } text;
+        
+        struct TextInput
+        {
+            TextEdit textEdit;
+        } textInput;
     };
     
 } MUI_Widget;

@@ -29,6 +29,7 @@ void MUI_BeginFrame(MUI *ui, MUI_Input *input)
         ui->mouseY = input->mouseY;
         ui->textInputChar = input->textInputChar;
         ui->bTextInput = input->bTextInput;
+        ui->backSpaceDown = input->backSpaceDown;
     }
 }
 
@@ -64,8 +65,9 @@ void MUI_EndFrame(MUI *ui, Buffer *buffer, FontData *fontData)
             {
                 //bg rect
                 MUI_Rect rect = ui->widgets[i].rect;
+                
                 color = ui->widgets[i].style.sliderStyle.bgColor;
-                DrawRect(buffer, &rect, color);
+                DrawRectWire(buffer, &rect, color);
                 
                 //sliding rect
                 MUI_Rect slideRect = rect;
@@ -79,16 +81,43 @@ void MUI_EndFrame(MUI *ui, Buffer *buffer, FontData *fontData)
             {
                 MUI_Rect rect = ui->widgets[i].rect;
                 
-                highlighted = MUI_IdEqual(ui->hotWidgetId, ui->widgets[i].id);
+                highlighted = MUI_IdEqual(ui->activeWidgetId, ui->widgets[i].id);
                 
                 color = highlighted ? ui->widgets[i].style.buttonStyle.highlightColor : ui->widgets[i].style.buttonStyle.idleColor;
                 
-                DrawRect(buffer, &rect, color);
+                DrawRectWire(buffer, &rect, color);
                 
                 if(highlighted)
                 {
                     Color borderColor = {255, 255, 255, 255};
                     DrawRectWire(buffer, &rect, borderColor);
+                }
+                
+                //text
+                i32 textX = rect.x + 4;
+                i32 textY = (rect.height - fontData->lineHeight) / 2;
+                textY = textY + rect.y;
+                
+                char *text = ui->widgets[i].textInput.textEdit.text;
+                
+                if (text != NULL)
+                {
+                    RenderText(buffer, text, strlen(text), fontData, textX, textY, (Color){255, 255, 255, 255}, rect);
+                }
+                
+                //cursor
+                if(highlighted)
+                {
+                    Rect caret = {0};
+                    caret.x = textX + (fontData->charDatas['A'].xadvance * strlen(text));
+                    caret.y = textY;
+                    caret.width = fontData->charDatas['A'].xadvance;
+                    caret.height = fontData->lineHeight;
+                    
+                    if((caret.x +caret.width) <= (rect.x + rect.width))
+                    {
+                        DrawRect(buffer, &caret, (Color){255, 255, 255, 255});
+                    }
                 }
             }
             break;
@@ -199,19 +228,20 @@ bool MUI_Button(MUI *ui, MUI_Id id, char *text, MUI_Rect rect, MUI_Style style)
         widget->widgetType = MUI_WIDGET_BUTTON;
         widget->rect = rect;
         widget->style = style;
+        
+        MUI_Style textStyle = {
+            .textStyle = {
+                .textColor = style.buttonStyle.textColor,
+            },
+        };
+        
+        MUI_Text(ui, MUI_IdInit(id.primary - 10, id.secondary + 10), rect, text, style.buttonStyle.fontSize, textStyle);
+        
     }
     else
     {
         printf("MUI widget count out of bound\n");
     }
-    
-    MUI_Style textStyle = {
-        .textStyle = {
-            .textColor = style.buttonStyle.textColor,
-        },
-    };
-    
-    MUI_Text(ui, MUI_IdInit(id.primary - 10, id.secondary + 10), rect, text, style.buttonStyle.fontSize, textStyle);
     
     return isTriggered;
 }
@@ -253,7 +283,7 @@ f32 MUI_Slider(MUI *ui, MUI_Id id, f32 value, MUI_Rect rect, MUI_Style style)
     {
         if (ui->leftMouseButtonDown)
         {
-            value = (f32)(ui->mouseX - left) / (f32)rect.width;
+            value = ((f32)ui->mouseX - (f32)left) / (f32)rect.width;
         }
         else
         {
@@ -261,7 +291,7 @@ f32 MUI_Slider(MUI *ui, MUI_Id id, f32 value, MUI_Rect rect, MUI_Style style)
         }
     }
     
-    if (value < 0.0f)
+    if (value <= 0.0f)
     {
         value = 0.0f;
     }
@@ -278,11 +308,23 @@ f32 MUI_Slider(MUI *ui, MUI_Id id, f32 value, MUI_Rect rect, MUI_Style style)
         widget->rect = rect;
         widget->slider.value = value;
         widget->style = style;
+        
+        //value text
+        MUI_Style textStyle = {
+            .textStyle = {
+                .textColor = {255, 255, 255, 255},
+            },
+        };
+        
+        sprintf(widget->slider.valueStr, "%0.3f\0", value);
+        MUI_Text(ui, MUI_IdInit(id.primary - 5, id.secondary + 5), rect, widget->slider.valueStr, 20, textStyle);
+        
     }
     else
     {
         printf("UI widget count out of bound\n");
     }
+    
     
     return value;
 }
@@ -294,10 +336,10 @@ f32 MUI_SliderA(MUI *ui, MUI_Id id, f32 value, MUI_Style style)
 
 void MUI_TextEdit(MUI *ui, MUI_Id id, MUI_Rect rect, MUI_Style style, TextEdit *textEdit)
 {
-    u32 left = rect.x - rect.width / 2;
-    u32 right = rect.x + rect.width / 2;
-    u32 top = rect.y - rect.height / 2;
-    u32 bottom = rect.y + rect.height / 2;
+    u32 left = rect.x;
+    u32 right = rect.x + rect.width;
+    u32 top = rect.y;
+    u32 bottom = rect.y + rect.height;
     
     bool isMouseOver = (ui->mouseX > left && ui->mouseX < right &&
                         ui->mouseY > top && ui->mouseY < bottom);
@@ -305,6 +347,11 @@ void MUI_TextEdit(MUI *ui, MUI_Id id, MUI_Rect rect, MUI_Style style, TextEdit *
     if (!MUI_IdEqual(id, ui->hotWidgetId) && isMouseOver)
     {
         ui->hotWidgetId = id;
+    }
+    else if (MUI_IdEqual(id, ui->hotWidgetId) && !isMouseOver && ui->leftMouseButtonDown)
+    {
+        ui->hotWidgetId = MUI_NullId();
+        ui->activeWidgetId = MUI_NullId();
     }
     
     if (MUI_IdEqual(id, ui->activeWidgetId))
@@ -318,6 +365,12 @@ void MUI_TextEdit(MUI *ui, MUI_Id id, MUI_Rect rect, MUI_Style style, TextEdit *
                     textEdit->text[textEdit->cursorPos] = ui->textInputChar;
                     textEdit->cursorPos++;
                 }
+            }
+            
+            if(ui->backSpaceDown && textEdit->cursorPos > 0)
+            {
+                textEdit->cursorPos--;
+                textEdit->text[textEdit->cursorPos] = 0;
             }
         }
     }
@@ -339,21 +392,18 @@ void MUI_TextEdit(MUI *ui, MUI_Id id, MUI_Rect rect, MUI_Style style, TextEdit *
         widget->widgetType = MUI_WIDGET_TEXTEDIT;
         widget->rect = rect;
         widget->style = style;
+        widget->textInput.textEdit = *textEdit;
     }
     else
     {
         printf("UI widget count out of bound\n");
     }
     
-    MUI_Style textStyle = {
-        .textStyle = {
-            .textColor = (Color){255, 255, 255, 255},
-        },
-    };
-    
-    MUI_Rect textRect = {0};
-    textRect.x = rect.x;
-    MUI_Text(ui, MUI_IdInit(id.primary - 10, id.secondary + 10), rect, textEdit->text, 20, textStyle);
+}
+
+void MUI_TextEditA(MUI *ui, MUI_Id id, MUI_Style style, TextEdit *textEdit)
+{
+    MUI_TextEdit(ui, id, MUI_GetNextAutoLayoutRect(ui), style, textEdit);
 }
 
 void MUI_PushColumnLayout(MUI *ui, MUI_Rect rect, u32 offset)

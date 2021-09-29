@@ -12,8 +12,8 @@ MUI_Style buttonStyle = {
 
 MUI_Style sliderStyle = {
     .sliderStyle = {
-        .bgColor = {255, 255, 255, 255},
-        .sliderColor = {255, 0, 0, 255},
+        .bgColor = {51, 153, 255, 255},
+        .sliderColor = {51, 153, 255, 255},
     }
 };
 
